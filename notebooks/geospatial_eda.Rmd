@@ -1,0 +1,54 @@
+```{r}
+library(tidyverse)
+library(jsonlite)
+library(mapdeck)
+```
+
+```{r}
+mapbox <- read_json("../data/mapbox.json")
+set_token(mapbox$token)
+```
+
+```{r}
+providers <- read_csv("../data/tn_providers.csv", show_col_types = F)
+hop_teaming <- read_csv("../data/tn_hop_teaming.csv", show_col_types = F)
+addresses <- read_csv("../data/tn_team_hopping_addresses.csv", show_col_types = F)
+```
+
+```{r}
+npi_lat_long <- providers %>% 
+  inner_join(addresses %>% drop_na(geo_address),
+             by = c("address_first_line", 
+                    "address_second_line", 
+                    "city", 
+                    "state", 
+                    "zipcode")) %>%
+  select(npi, lat, long)
+
+write_csv(npi_lat_long, "../data/npi_lat_long.csv")
+```
+
+```{r}
+hop_teaming_lat_long <- hop_teaming %>% 
+  inner_join(npi_lat_long %>% rename_with(~paste0("from_", .x)), by = "from_npi") %>%
+  inner_join(npi_lat_long %>% rename_with(~paste0("to_", .x)), by = "to_npi")
+
+write_csv(hop_teaming_lat_long, "../data/hop_teaming_lat_long.csv")
+```
+
+```{r}
+mapdeck(style = mapdeck_style("light"), pitch = 60) %>%
+  add_animated_arc(
+    data = hop_teaming_lat_long %>% sample_n(500), 
+    layer_id = "arc_layer", 
+    origin = c("from_long", "from_lat"), 
+    destination = c("to_long", "to_lat"), 
+    stroke_from = "from_npi", 
+    stroke_to = "to_npi",
+    stroke_width = 1,
+    brush_radius = 80467)
+```
+
+
+
+

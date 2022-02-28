@@ -1,0 +1,208 @@
+```{r}
+library(tidyverse)
+library(gridExtra)
+```
+
+```{r}
+hop_teaming_providers <- read_csv("../data/hop_teaming_providers.csv", show_col_types = F)
+hop_teaming_facilities <- read_csv("../data/hop_teaming_facilities.csv", show_col_types = F)
+hop_teaming_provider_to_facility <- read_csv("../data/hop_teaming_provider_to_facility.csv", show_col_types = F)
+hop_teaming_provider_to_provider <- read_csv("../data/hop_teaming_provider_to_provider.csv", show_col_types = F)
+cms_provider_data <- read_csv("../data/cms_provider_data.csv", show_col_types = F)
+specialty_corrections <- read_csv("../data/provider_specialty_corrections.csv", show_col_types = F)
+```
+
+```{r}
+get_provider_specialty <- function(provider) {
+  
+  specialty <- provider$specialty
+  classification <- provider$classification
+  specialization <- provider$specialization
+  
+  case_when(
+  #   # provider$taxonomy_classification == "Anesthesiology" ~ paste0("Anesthesiology|", provider$taxonomy_specialization),
+  #   # provider$taxonomy_classification == "Dermatology" ~ "Dermatology",
+  #   # provider$taxonomy_classification == "Nurse Practitioner" ~ paste0("Nurse Practitioner|", provider$taxonomy_display_name),
+  #   # provider$taxonomy_classification == "Internal Medicine" & str_detect(provider$taxonomy_specialization, "Cardiac|Cardio") ~ paste0("Cardiology|", provider$taxonomy_specialization),
+  #   # provider$taxonomy_classification == "Internal Medicine" & str_detect(provider$taxonomy_specialization, "Hematology|Oncology") ~ paste0("Hematology/Oncology|", provider$taxonomy_specialization),
+  #   # provider$taxonomy_classification == "Radiology" ~ paste0("Radiology|", provider$taxonomy_specialization),
+  #   # provider$taxonomy_classification == "Nuclear Medicine" ~ "Radiology|Nuclear Medicine",
+    str_detect(classification, "Nurse Anesthetist") ~ "Nurse Anesthetist",
+    str_detect(specialization, "Endocrinology") ~  "Endocrinology",
+    str_detect(classification, "Thoracic Surgery") ~ "Thoracic Surgery",
+    classification == "Internal Medicine" ~ coalesce(specialization, "General Internal Medicine"),
+    TRUE ~ str_remove(coalesce(specialty, paste0(classification, "|", specialization)), "\\|NA")
+  )
+}
+
+get_provider_affiliation <- function(provider) {
+
+  address <- paste(provider$address_first_line, provider$address_second_line)
+
+  case_when(
+    provider$zipcode == 37232 ~ "VANDERBILT UNIVERSITY MEDICAL CENTER",
+    str_detect(address, "VANDERBILT|TVC|1\\d{3} 21ST|2201 CHILDRENS") ~ "VANDERBILT UNIVERSITY MEDICAL CENTER",
+    str_detect(address, "(1407|1411).+BADDOUR") ~ "VANDERBILT WILSON COUNTY HOSPITAL",
+    str_detect(address, "719 THOMPSON") ~ "VANDERBILT HEALTH ONE HUNDRED OAKS",
+    str_detect(address, "919 MURFREESBORO") ~ "VANDERBILT HEALTH AND WILLIAMSON MEDICAL CENTER WALK-IN CLINIC FRANKLIN",
+    str_detect(address, "4\\d{3} HARDING") ~ "ASCENSION SAINT THOMAS HOSPITAL",
+    str_detect(address, "2\\d{3} CHURCH|\\D301 21ST|2000 MURPHY") ~ "ASCENSION SAINT THOMAS HOSPITAL MIDTOWN",
+    str_detect(address, "1\\d{3} MEDICAL CENTER") ~ "ASCENSION SAINT THOMAS RUTHERFORD HOSPITAL",
+    str_detect(address, "300 20TH|2011 MURPHY") ~ "ASCENSION MEDICAL GROUP",
+    str_detect(address, "12\\d{2} TROTWOOD") ~ "MAURY REGIONAL MEDICAL CENTER",
+    str_detect(address, "[7-8]\\d{2}.+JAMES.+CAMPBELL") ~ "MAURY REGIONAL MEDICAL GROUP",
+    str_detect(address, "1818 ALBION") ~ "NASHVILLE GENERAL HOSPITAL",
+    str_detect(address, "555 HARTSVILLE|300 STEAM PLANT") ~ "SUMNER REGIONAL MEDICAL CENTER",
+    str_detect(address, "313 N MAIN") ~ "TRISTAR ASHLAND CITY MEDICAL CENTER",
+    str_detect(address, "2\\d{3} PATTERSON|3\\d{2}.+23RD") ~ "TRISTAR CENTENNIAL MEDICAL CENTER",
+    str_detect(address, "35\\d NEW SHACKLE ISLAND") ~ "TRISTAR HENDERSONVILLE MEDICAL CENTER",
+    str_detect(address, "(100|221|501) NORTHCREST|2102 PARK PLAZA") ~ "TRISTAR NORTHCREST MEDICAL CENTER",
+    str_detect(address, "34\\d{2} DICKERSON") ~ "TRISTAR SKYLINE MEDICAL CENTER",
+    str_detect(address, "39\\d WALLACE") ~ "TRISTAR SOUTHERN HILLS MEDICAL CENTER",
+    str_detect(address, "[2-3]\\d{2} STONECREST") ~ "TRISTAR STONECREST MEDICAL CENTER",
+    str_detect(address, "56\\d{2} FRIST") ~ "TRISTAR SUMMIT MEDICAL CENTER",
+    str_detect(address, ".*43\\d{2} CAROTHERS") ~ "WILLIAMSON MEDICAL CENTER"
+  )
+}
+
+
+get_facility_affiliation <- function(facility) {
+  
+  org_name <- paste(facility$organization_name, facility$organization_name_other)
+    
+  vumc <- "VANDERBILT|MAURY REGIONAL|WILLIAMSON MEDICAL"
+  ascension <- "ASCENSION|SAINT|THOMAS|BAPTIST"
+  hca <- "TRISTAR|FRIST|CENTENNIAL|NORTHCREST|SKYLINE|SOUTHERN HILLS|STONECREST|PHYSICIANS PAVILION|SUMMIT"
+  lifepoint <- "HIGHPOINT|SUMNER|RIVERVIEW|TROUSDALE"
+  chs <- "TENNOVA"
+  asc <- "SURGERY"
+  
+  case_when(
+    str_detect(org_name, vumc) ~ "VUMC",
+    str_detect(org_name, ascension) ~ "ASCENSION",
+    str_detect(org_name, hca) ~ "HCA",
+    str_detect(org_name, lifepoint) ~ "LIFEPOINT",
+    str_detect(org_name, chs) ~ "CHS",
+    str_detect(org_name, asc) ~ "SURGERY CENTER"
+  )
+}
+```
+
+```{r}
+hop_teaming_providers_filtered <- hop_teaming_providers %>% 
+  left_join(specialty_corrections) %>%
+  filter(!(grouping %in% c("Chiropractic Providers",
+                           "Pharmacy Service Providers")),
+         !(specialization %in% c("Anatomic Pathology & Clinical Pathology",
+                                 "Clinical Pathology/Laboratory Medicine",
+                                 "Cytopathology",
+                                 "Diagnostic Radiology"))) %>%
+  mutate(specialty = get_provider_specialty(.)) %>%
+  separate(col = specialty, into = c("specialty", "subspecialty"), sep = "\\|", fill = "right") %>%
+  write_csv("../data/hop_teaming_providers_filtered.csv", na = "")
+```
+
+```{r}
+hop_teaming_facilities_filtered <- hop_teaming_facilities %>% 
+  filter(!(grouping %in% c("Chiropractic Providers", 
+                           "Laboratories", 
+                           "Suppliers",
+                           "Transportation Services")),
+         !(specialization %in% c("Anatomic Pathology & Clinical Pathology",
+                                 "Clinical Pathology/Laboratory Medicine",
+                                 "Cytopathology",
+                                 "Diagnostic Radiology"))) %>%
+  mutate(affiliation = get_facility_affiliation(.)) %>%
+  write_csv("../data/hop_teaming_facilities_filtered.csv", na = "")
+```
+
+```{r}
+hop_teaming_provider_to_facility_patient_counts <- hop_teaming_provider_to_facility %>% 
+  inner_join(hop_teaming_providers %>% rename_with(~paste0("from_", .x)), by = "from_npi") %>%
+  inner_join(hop_teaming_facilities_filtered %>% rename_with(~paste0("to_", .x)), by = "to_npi") %>%
+  relocate(from_first_name,
+           from_middle_name,
+           from_last_name,
+           from_credentials,
+           from_specialty,
+           from_subspecialty,
+           from_affiliation,
+           from_organization_name,
+           to_organization_name,
+           .after = last_col()) %>%
+  group_by(across(-c(from_entity_type_code,
+                     from_suffix,
+                     to_entity_type_code,
+                     to_cbsa,
+                     patient_count,
+                     transaction_count, 
+                     average_day_wait,
+                     std_day_wait))) %>%
+  summarize(patients = sum(patient_count), 
+            transactions = sum(transaction_count),
+            average_day_wait = mean(average_day_wait * transaction_count / sum(transaction_count)), 
+            .groups = "drop") %>%
+  arrange(desc(patients)) %>%
+  write_csv("../data/hop_teaming_provider_to_facility_patient_counts.csv", na = "")
+```
+
+```{r}
+specialties <- hop_teaming_provider_to_facility_patient_counts %>% 
+  group_by(specialty = from_specialty) %>%
+  summarize(providers = n_distinct(from_npi),
+            entries = n(),
+            patients = sum(patients),
+            transactions = sum(transactions)) %>%
+  arrange(desc(transactions))
+
+histograms <- list()
+
+df <- hop_teaming_provider_to_facility_patient_counts
+df <- tibble(x = rep(df$average_day_wait, df$transactions))
+
+avg_day_wait <- density(df$x)
+local_minimum <- avg_day_wait$x[which(diff(sign(diff(avg_day_wait$y))) == 2) + 1][1]
+
+subtitle = paste("Providers:", scales::comma(n_distinct(hop_teaming_provider_to_facility_patient_counts$from_npi)),
+                 "   Entries:", scales::comma(nrow(hop_teaming_provider_to_facility_patient_counts)),
+                 "   Patients:", scales::comma(sum(hop_teaming_provider_to_facility_patient_counts$patients)),
+                 "   Transactions:", scales::comma(sum(hop_teaming_provider_to_facility_patient_counts$transactions)),
+                 "   Local Minimum:", format(round(local_minimum, 2), nsmall = 2), "days")
+
+histograms[[1]] <- ggplot(df, aes(x = x)) +
+  geom_density(aes(y = ..density..), lwd = 1, colour = 4, fill = 4, alpha = 0.25) +
+  xlim(0, 50) +
+  labs(title = "All Specialties", 
+       x = "Average Day Wait", 
+       y = "Transaction Count",
+       subtitle = subtitle) +
+  theme_minimal(base_size = 8)
+
+for(i in 1:nrow(specialties)) {
+
+  df <- hop_teaming_provider_to_facility_patient_counts %>%
+    filter(from_specialty == specialties$specialty[i])
+  df <- tibble(x = rep(df$average_day_wait, df$transactions))
+
+  avg_day_wait <- density(df$x)
+  local_minimum <- avg_day_wait$x[which(diff(sign(diff(avg_day_wait$y))) == 2) + 1][1]
+
+  subtitle = paste("Providers:", scales::comma(specialties$providers[i]),
+                   "   Entries:", scales::comma(specialties$entries[i]),
+                   "   Patients:", scales::comma(specialties$patients[i]),
+                   "   Transactions:", scales::comma(specialties$transactions[i]),
+                   "   Local Minimum:", format(round(local_minimum, 2), nsmall = 2), "days")
+
+  histograms[[i+1]] <- ggplot(df, aes(x = x)) +
+    geom_density(aes(y = ..density..), lwd = 1, colour = 4, fill = 4, alpha = 0.25) +
+    xlim(0, 50) +
+    labs(title = specialties$specialty[i], 
+         x = "Average Day Wait", 
+         y = "Transaction Count",
+         subtitle = subtitle) +
+    theme_minimal(base_size = 8)
+}
+
+ggsave(filename = "../data/avg_day_wait_plots.pdf", width = 8.5, height = 11, units = "in", 
+       marrangeGrob(histograms, nrow = 4, ncol = 1, top = "", bottom = "", left = "", right = ""))
+```
