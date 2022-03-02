@@ -49,6 +49,72 @@ mapdeck(style = mapdeck_style("light"), pitch = 60) %>%
     brush_radius = 80467)
 ```
 
+```{r}
+hop_teaming_provider_to_facility_patient_counts <- read_csv("../data/hop_teaming_provider_to_facility_patient_counts.csv", show_col_types = F)
+npi_lat_long <- read_csv("../data/npi_lat_long.csv", show_col_types = F)
+```
+
+```{r}
+df <- hop_teaming_provider_to_facility_patient_counts %>% 
+  filter(from_cbsa == 34980, 
+         to_affiliation %in% c("VUMC", "HCA", "ASCENSION SAINT THOMAS", "OTHER"),
+         from_specialty == "Orthopaedic Surgery") %>%
+  inner_join(npi_lat_long %>% rename_with(~paste0("from_", .x)), by = "from_npi") %>%
+  inner_join(npi_lat_long %>% rename_with(~paste0("to_", .x)), by = "to_npi") %>%
+  mutate(from_hex = case_when(to_affiliation == "VUMC" ~ "#9a783d01",
+                              to_affiliation == "HCA" ~ "#e2592901",
+                              to_affiliation == "ASCENSION SAINT THOMAS" ~ "#1c429701",
+                              to_affiliation == "OTHER" ~ "#aaaaaa01"),
+         to_hex = case_when(to_affiliation == "VUMC" ~ "#9a783d80",
+                            to_affiliation == "HCA" ~ "#e2592980",
+                            to_affiliation == "ASCENSION SAINT THOMAS" ~ "#1c429780",
+                            to_affiliation == "OTHER" ~ "#aaaaaa80"))
+```
+
+```{r}
+mapdeck(style = mapdeck_style("dark"), pitch = 60) %>%
+  add_grid(
+    data = df %>% filter(to_affiliation == "VUMC"),
+    lat = "from_lat",
+    lon = "from_long",
+    colour_range = c("#9a783d","#9a783d","#9a783d","#9a783d","#9a783d","#9a783d"),
+    cell_size = 500,
+    elevation_scale = 25,
+    layer_id = "VUMC") %>%
+  add_grid(
+    data = df %>% filter(to_affiliation == "HCA"),
+    lat = "from_lat",
+    lon = "from_long",
+    colour_range = c("#e25929","#e25929","#e25929","#e25929","#e25929","#e25929"),
+    cell_size = 500,
+    elevation_scale = 25,
+    layer_id = "HCA") %>%
+  add_grid(
+    data = df %>% filter(to_affiliation == "ASCENSION SAINT THOMAS"),
+    lat = "from_lat",
+    lon = "from_long",
+    colour_range = c("#1c4297","#1c4297","#1c4297","#1c4297","#1c4297","#1c4297"),
+    cell_size = 500,
+    elevation_scale = 25,
+    layer_id = "ASCENSION SAINT THOMAS") %>%
+  add_grid(
+    data = df %>% filter(to_affiliation == "OTHER"),
+    lat = "from_lat",
+    lon = "from_long",
+    colour_range = c("#aaaaaa","#aaaaaa","#aaaaaa","#aaaaaa","#aaaaaa","#aaaaaa"),
+    cell_size = 500,
+    elevation_scale = 25,
+    layer_id = "OTHER") %>%
+  add_animated_arc(
+    data = df %>% sample_n(200), 
+    layer_id = "arc_layer", 
+    origin = c("from_long", "from_lat"), 
+    destination = c("to_long", "to_lat"), 
+    stroke_from = "from_hex", 
+    stroke_to = "to_hex",
+    animation_speed = 0.1,
+    stroke_width = 2)
+```
 
 
 

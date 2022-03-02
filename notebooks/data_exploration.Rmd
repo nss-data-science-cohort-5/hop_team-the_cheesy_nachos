@@ -9,27 +9,24 @@ hop_teaming_facilities <- read_csv("../data/hop_teaming_facilities.csv", show_co
 hop_teaming_provider_to_facility <- read_csv("../data/hop_teaming_provider_to_facility.csv", show_col_types = F)
 hop_teaming_provider_to_provider <- read_csv("../data/hop_teaming_provider_to_provider.csv", show_col_types = F)
 cms_provider_data <- read_csv("../data/cms_provider_data.csv", show_col_types = F)
-specialty_corrections <- read_csv("../data/provider_specialty_corrections.csv", show_col_types = F)
+specialty_corrections <- read_csv("../data/provider_specialty_corrections.csv",  show_col_types = F) %>%
+  mutate(specialty = str_remove(paste0(specialty, "|", subspecialty), "\\|NA"))
 ```
 
 ```{r}
 get_provider_specialty <- function(provider) {
   
-  specialty <- provider$specialty
+  specialty <- provider$specialty 
   classification <- provider$classification
   specialization <- provider$specialization
   
   case_when(
-  #   # provider$taxonomy_classification == "Anesthesiology" ~ paste0("Anesthesiology|", provider$taxonomy_specialization),
-  #   # provider$taxonomy_classification == "Dermatology" ~ "Dermatology",
-  #   # provider$taxonomy_classification == "Nurse Practitioner" ~ paste0("Nurse Practitioner|", provider$taxonomy_display_name),
-  #   # provider$taxonomy_classification == "Internal Medicine" & str_detect(provider$taxonomy_specialization, "Cardiac|Cardio") ~ paste0("Cardiology|", provider$taxonomy_specialization),
-  #   # provider$taxonomy_classification == "Internal Medicine" & str_detect(provider$taxonomy_specialization, "Hematology|Oncology") ~ paste0("Hematology/Oncology|", provider$taxonomy_specialization),
-  #   # provider$taxonomy_classification == "Radiology" ~ paste0("Radiology|", provider$taxonomy_specialization),
-  #   # provider$taxonomy_classification == "Nuclear Medicine" ~ "Radiology|Nuclear Medicine",
     str_detect(classification, "Nurse Anesthetist") ~ "Nurse Anesthetist",
     str_detect(specialization, "Endocrinology") ~  "Endocrinology",
     str_detect(classification, "Thoracic Surgery") ~ "Thoracic Surgery",
+    str_detect(classification, "Nuclear Medicine") ~ "Radiology|Nuclear Medicine",
+    str_detect(classification, "Neuromusculoskeletal Medicine") ~ "Physical Medicine & Rehabilitation",
+    str_detect(classification, "General Practice") ~ "General Internal Medicine",
     classification == "Internal Medicine" ~ coalesce(specialization, "General Internal Medicine"),
     TRUE ~ str_remove(coalesce(specialty, paste0(classification, "|", specialization)), "\\|NA")
   )
@@ -75,15 +72,18 @@ get_facility_affiliation <- function(facility) {
   hca <- "TRISTAR|FRIST|CENTENNIAL|NORTHCREST|SKYLINE|SOUTHERN HILLS|STONECREST|PHYSICIANS PAVILION|SUMMIT"
   lifepoint <- "HIGHPOINT|SUMNER|RIVERVIEW|TROUSDALE"
   chs <- "TENNOVA"
+  advancedhealth <- "ADVANCEDHEALTH"
   asc <- "SURGERY"
   
   case_when(
     str_detect(org_name, vumc) ~ "VUMC",
-    str_detect(org_name, ascension) ~ "ASCENSION",
+    str_detect(org_name, ascension) ~ "ASCENSION SAINT THOMAS",
     str_detect(org_name, hca) ~ "HCA",
     str_detect(org_name, lifepoint) ~ "LIFEPOINT",
     str_detect(org_name, chs) ~ "CHS",
-    str_detect(org_name, asc) ~ "SURGERY CENTER"
+    # str_detect(org_name, advancedhealth) ~ "ADVANCEDHEALTH",
+    # str_detect(org_name, asc) ~ "SURGERY CENTER",
+    TRUE ~ "OTHER"
   )
 }
 ```
@@ -118,18 +118,16 @@ hop_teaming_facilities_filtered <- hop_teaming_facilities %>%
 
 ```{r}
 hop_teaming_provider_to_facility_patient_counts <- hop_teaming_provider_to_facility %>% 
-  inner_join(hop_teaming_providers %>% rename_with(~paste0("from_", .x)), by = "from_npi") %>%
+  inner_join(hop_teaming_providers_filtered %>% rename_with(~paste0("from_", .x)), by = "from_npi") %>%
   inner_join(hop_teaming_facilities_filtered %>% rename_with(~paste0("to_", .x)), by = "to_npi") %>%
-  relocate(from_first_name,
-           from_middle_name,
-           from_last_name,
-           from_credentials,
-           from_specialty,
-           from_subspecialty,
-           from_affiliation,
-           from_organization_name,
-           to_organization_name,
-           .after = last_col()) %>%
+  # relocate(from_first_name,
+  #          from_middle_name,
+  #          from_last_name,
+  #          from_credentials,
+  #          from_specialty,
+  #          from_subspecialty,
+  #          to_organization_name,
+  #          .after = last_col()) %>%
   group_by(across(-c(from_entity_type_code,
                      from_suffix,
                      to_entity_type_code,
@@ -144,6 +142,39 @@ hop_teaming_provider_to_facility_patient_counts <- hop_teaming_provider_to_facil
             .groups = "drop") %>%
   arrange(desc(patients)) %>%
   write_csv("../data/hop_teaming_provider_to_facility_patient_counts.csv", na = "")
+```
+
+```{r}
+order = c("VUMC", "HCA", "ASCENSION SAINT THOMAS", "LIFEPOINT", "OTHER")
+palette = c("#9a783d", "#e25929", "#1c4297", "#5f6062", "#aaaaaa")
+# "#4268a9"
+
+hop_teaming_provider_to_facility_patient_counts %>%
+  filter(!(from_specialty %in% c("Advanced Practice Midwife",
+                                 "Adolescent Medicine",
+                                 "Audiologist",
+                                 "Audiologist-Hearing Aid Fitter",
+                                 "Clinical Neuropsychologist",
+                                 "Clinical Nurse Specialist",
+                                 "Clinical Pharmacology",
+                                 "Counselor",
+                                 "Dietitian, Registered",
+                                 "Hepatology",
+                                 "Legal Medicine",
+                                 "Occupational Therapist",
+                                 "Psychologist",
+                                 "Registered Nurse",
+                                 "Social Worker",
+                                 "Sports Medicine"))) %>%
+  group_by(to_affiliation, from_specialty) %>%
+  summarize(patients = sum(patients)) %>%
+  ggplot(aes(y = reorder(from_specialty, patients), x = patients, fill = factor(to_affiliation, level = order))) +
+  geom_bar(position = "fill", stat = "identity") +
+  # scale_y_continuous(labels = scales::comma) +
+  labs(y = "") +
+  theme_minimal() +
+  # theme(axis.text.y = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  scale_fill_manual(values = palette) 
 ```
 
 ```{r}
